@@ -2821,6 +2821,7 @@ static int es9218p_set_sample_rate(unsigned int bit_width, unsigned int sample_r
 				break;
 		}
 	}
+    es9218_sabre_cfg_custom_filter(&es9218_sabre_custom_ft[g_sabre_cf_num]);
 	return ret;
 }
 
