@@ -1611,7 +1611,7 @@ static ssize_t set_forced_ess_custom_filter(struct device *dev,
 	}
 
 	/* Load the received data into the custom filter */
-	if(filter_data[0] >= 0 && filter_data[0] !=  5 && filter_data[0] <= 7) /* Load filter shape config */
+	if(filter_data[0] >= 0 && filter_data[0] <= 7) /* Load filter shape config */
 		es9218_sabre_custom_ft[3].shape    = filter_data[0];
 	if(filter_data[1] == 0 || filter_data[1] == 1) /* Copy filter symmetry config */
 		es9218_sabre_custom_ft[3].symmetry = filter_data[1];
