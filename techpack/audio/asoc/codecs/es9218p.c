@@ -1814,7 +1814,7 @@ static int es9218_sabre_cfg_custom_filter(struct sabre_custom_filter *sabre_filt
     es9218_write_reg(g_es9218_priv->i2c_client, ES9218P_REG_40 - 1, rv);
 
     rv = (sabre_filter->shape << 5); // select the custom filter roll-off shape
-    rv |= 0x80;
+    // rv |= 0x80;
     rc = es9218_write_reg(g_es9218_priv->i2c_client, ES9218P_REG_07, rv);
     if (rc < 0) {
         pr_err("%s: rc = %d return ",__func__, rc);
