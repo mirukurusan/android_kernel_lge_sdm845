@@ -104,6 +104,8 @@ static int g_right_fade_vol_per_step = 0;
 static int g_left_fade_vol_per_step = 0;
 static int g_left_fade_vol = 0;
 static int g_right_fade_vol = 0;
+static bool g_bps_lck = false;
+static bool g_rate_lck = false;
 bool lge_ess_fade_inout_init = false;
 #endif
 struct es9218_reg {
@@ -1589,6 +1591,68 @@ static ssize_t get_forced_ess_filter(struct device *dev,
 }
 static DEVICE_ATTR(ess_filter, S_IWUSR|S_IRUGO, get_forced_ess_filter, set_forced_ess_filter);
 
+static ssize_t set_forced_bit_width(struct device *dev,
+                   struct device_attribute *attr,
+                   const char *buf, size_t count)
+{
+    int input_bit_width;
+    sscanf(buf, "%d", &input_bit_width);
+
+    switch (input_bit_width) {
+        case 0:
+            g_bps_lck = false;
+            pr_notice("%s() : bit width lock unset, g_bps_lck = %d \n", __func__, g_bps_lck);
+            break;
+        case 16:
+        case 24:
+        case 32:
+            g_bps_lck = true;
+            es9218_bps = input_bit_width;
+            pr_notice("%s() : bit width set, es9218_bps = %d , g_bps_lck = %d \n", __func__, es9218_bps, g_bps_lck);
+            break;
+        default:
+            return -EINVAL;
+            break;
+    }
+
+    return count;
+}
+static ssize_t get_bit_width(struct device *dev,
+                   struct device_attribute *attr,
+                   char *buf)
+{
+    return sprintf(buf, "%i\n", es9218_bps);
+}
+static DEVICE_ATTR(bit_width, S_IWUSR|S_IRUGO, get_bit_width, set_forced_bit_width);
+
+static ssize_t set_forced_sample_rate(struct device *dev,
+                   struct device_attribute *attr,
+                   const char *buf, size_t count)
+{
+    int input_sample_rate;
+    sscanf(buf, "%d", &input_sample_rate);
+
+    if (input_sample_rate == 0) {
+        g_rate_lck = false;
+        pr_notice("%s() : sample rate lock unset, g_rate_lck = %d \n", __func__, g_rate_lck);
+    } else if (input_sample_rate < 44100 || input_sample_rate > 384000 || input_sample_rate % 100 != 0) {
+        return -EINVAL;
+    } else {
+        g_rate_lck = true;
+        es9218_rate = input_sample_rate;
+        pr_notice("%s() : sample rate set, es9218_rate = %d , g_bps_lck = %d \n", __func__, es9218_rate, g_rate_lck);
+    }
+
+    return count;
+}
+static ssize_t get_sample_rate(struct device *dev,
+                   struct device_attribute *attr,
+                   char *buf)
+{
+    return sprintf(buf, "%i\n", es9218_rate);
+}
+static DEVICE_ATTR(sample_rate, S_IWUSR|S_IRUGO, get_sample_rate, set_forced_sample_rate);
+
 /* Custom ESS Filter (filter [3] has to be selected) */
 #define MAX_FILTER_DATA_SIZE     16 /* shape, symmetry, followed by 14 stage 2 coefficients */
 /* 
@@ -1722,6 +1786,8 @@ static struct attribute *es9218_attrs[] = {
     &dev_attr_left_volume.attr,
 	&dev_attr_right_volume.attr,
     &dev_attr_ess_custom_filter.attr,
+    &dev_attr_bit_width.attr,
+    &dev_attr_sample_rate.attr,
     NULL
 };
 
@@ -4302,8 +4368,10 @@ static int es9218_pcm_hw_params(struct snd_pcm_substream *substream,
     //struct snd_soc_codec    *codec = codec_dai->codec;
     //struct es9218_priv      *priv  = codec->control_data;
     int ret = -1;
-    es9218_bps  = params_width(params);
-    es9218_rate = params_rate(params);
+    if (!g_bps_lck)
+        es9218_bps  = params_width(params);
+    if (!g_rate_lck)
+        es9218_rate = params_rate(params);
 
     pr_info("%s(): entry , bps : %d , rate : %d\n", __func__, es9218_bps, es9218_rate);
 
