@@ -479,6 +479,9 @@ long gpumem_free_entry(struct kgsl_mem_entry *entry);
 /* Helper functions */
 unsigned long kgsl_get_align(struct kgsl_memdesc *memdesc);
 
+/* Helper functions */
+unsigned long kgsl_get_align(struct kgsl_memdesc *memdesc);
+
 static inline int kgsl_gpuaddr_in_memdesc(const struct kgsl_memdesc *memdesc,
 				uint64_t gpuaddr, uint64_t size)
 {
