@@ -1506,18 +1506,24 @@ static ssize_t set_forced_avc_volume(struct device *dev,
     int input_vol;
     sscanf(buf, "%d", &input_vol);
 
-    if ( es9218_power_state < ESS_PS_HIFI ) {
-        pr_err("%s() : invalid state = %s\n", __func__, power_state[es9218_power_state]);
-        return -EINVAL;
-    }
-
-    if (input_vol >= sizeof(avc_vol_tbl)/sizeof(avc_vol_tbl[0])) {
+    if (input_vol < 0 || input_vol >= sizeof(avc_vol_tbl)/sizeof(avc_vol_tbl[0])) {
         pr_err("%s() : Invalid vol = %d return \n", __func__, input_vol);
         return -EINVAL;
     }
 
     g_avc_volume = input_vol;
     forced_avc_volume = input_vol;
+
+    if ( es9218_power_state < ESS_PS_HIFI ) {
+        /*
+         * Chip is not powered on yet; keep the value in memory only.
+         * es9218p_sabre_bypass2hifi() re-applies g_avc_volume on the next
+         * power-up.
+         */
+        pr_info("%s() : state = %s, avc volume %d stored for next power-up\n",
+                __func__, power_state[es9218_power_state], g_avc_volume);
+        return count;
+    }
 
     es9218_set_avc_volume(g_es9218_priv->i2c_client, g_avc_volume);
 
@@ -1539,19 +1545,12 @@ static ssize_t set_forced_ess_filter(struct device *dev,
     int input_filter;
     sscanf(buf, "%d", &input_filter);
 
-    if ( es9218_power_state < ESS_PS_HIFI ) {
-        pr_err("%s() : invalid state = %s\n", __func__, power_state[es9218_power_state]);
-        return -EINVAL;
-    }
-
-    if (input_filter > 11) {
+    if (input_filter < 0 || input_filter > 11) {
         pr_err("%s() : Invalid filter = %d return \n", __func__, input_filter);
         return -EINVAL;
     }
 
     g_sabre_cf_num = input_filter;
-
-    es9218_sabre_cfg_custom_filter(&es9218_sabre_custom_ft[g_sabre_cf_num]);
 
     // Logic taken from `mute_work_function` above
     if(g_sabre_cf_num == SHORT_FILTER)
@@ -1560,6 +1559,19 @@ static ssize_t set_forced_ess_filter(struct device *dev,
         g_volume = 4;
     else
         g_volume = 2;
+
+    if ( es9218_power_state < ESS_PS_HIFI ) {
+        /*
+         * Chip is not powered on yet; keep the selection in memory only.
+         * es9218p_sabre_bypass2hifi() re-applies the filter and the master
+         * trim on the next power-up.
+         */
+        pr_info("%s() : state = %s, filter %d stored for next power-up\n",
+                __func__, power_state[es9218_power_state], g_sabre_cf_num);
+        return count;
+    }
+
+    es9218_sabre_cfg_custom_filter(&es9218_sabre_custom_ft[g_sabre_cf_num]);
 
     es9218_master_trim(g_es9218_priv->i2c_client, g_volume);
 
@@ -1591,14 +1603,9 @@ static ssize_t set_forced_ess_custom_filter(struct device *dev,
 	char *received_data = kzalloc(MAX_FILTER_STRING_SIZE * sizeof(char), GFP_KERNEL);
 	int filter_data[MAX_FILTER_DATA_SIZE], i = 0;
 
+	memset(filter_data, 0, sizeof(filter_data));
 
 	sscanf(buf, "%s", received_data);
-
-	if ( es9218_power_state < ESS_PS_HIFI ) {
-		pr_err("%s() : invalid state = %s\n", __func__, power_state[es9218_power_state]);
-		kfree(received_data);
-		return -EINVAL;
-	}
 
 	/* Tokenize received data and save into the filter data array (everything is an integer) */
 	while ((datatoken = strsep(&received_data, delimiter)) != NULL && i < MAX_FILTER_DATA_SIZE) {
@@ -1634,7 +1641,17 @@ static ssize_t set_forced_ess_custom_filter(struct device *dev,
 		 */
 
 	/* Apply the filter (just to update the data internally in case custom filter is not selected) */
-	es9218_sabre_cfg_custom_filter(&es9218_sabre_custom_ft[g_sabre_cf_num]);
+	if ( es9218_power_state < ESS_PS_HIFI ) {
+		/*
+		 * Chip is not powered on yet; keep the data in memory only.
+		 * es9218p_sabre_bypass2hifi() re-applies the custom filter on the
+		 * next power-up.
+		 */
+		pr_info("%s() : state = %s, custom filter data stored for next power-up\n",
+		        __func__, power_state[es9218_power_state]);
+	} else {
+		es9218_sabre_cfg_custom_filter(&es9218_sabre_custom_ft[g_sabre_cf_num]);
+	}
 
 	/* We already used up the received data, so free all previously allocated space. */
 	kfree(received_data);
