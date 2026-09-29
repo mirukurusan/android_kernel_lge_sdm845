@@ -1767,7 +1767,7 @@ static int tfa98xx_set_vstep(struct snd_kcontrol *kcontrol,
 		tfa98xx_vsteps[1] = new_vstep;
 
 		// wait until when DSP is ready for initialization
-		if (tfa98xx->pstream != 0 || tfa98xx->samstream != 0) {
+		if (tfa98xx->pstream != 0 || tfa98xx->samstream != 0 || tfa98xx->hostless_stream != 0) {
 			mutex_lock(&tfa98xx->dsp_lock);
 			tfa98xx_open(tfa98xx->handle);
 			tfa98xx_close(tfa98xx->handle);
@@ -1962,7 +1962,7 @@ static int tfa98xx_set_profile(struct snd_kcontrol *kcontrol,
 #endif /* CONFIG_SND_SOC_TFA9872_STEREO */
 
 	// wait until when DSP is ready for initialization
-	if (tfa98xx->pstream != 0 || tfa98xx->samstream != 0) {
+	if (tfa98xx->pstream != 0 || tfa98xx->samstream != 0 || tfa98xx->hostless_stream != 0) {
 		mutex_lock(&tfa98xx->dsp_lock);
 		tfa98xx_open(tfa98xx->handle);
 		tfa98xx_close(tfa98xx->handle);
@@ -2138,6 +2138,57 @@ static int tfa98xx_info_profile(struct snd_kcontrol *kcontrol,
 	strcpy(uinfo->value.enumerated.name, profile_name);
 
 	return 0;
+}
+
+static int tfa98xx_get_hostless_ctl(struct snd_kcontrol *kcontrol,
+	struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_codec *codec = snd_soc_kcontrol_codec(kcontrol);
+	struct tfa98xx *tfa98xx = snd_soc_codec_get_drvdata(codec);
+
+	ucontrol->value.integer.value[0] = tfa98xx->hostless_stream;
+	return 0;
+}
+
+static int tfa98xx_set_hostless_ctl(struct snd_kcontrol *kcontrol,
+	struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_codec *codec = snd_soc_kcontrol_codec(kcontrol);
+	struct tfa98xx *tfa98xx = snd_soc_codec_get_drvdata(codec);
+	int enable = ucontrol->value.integer.value[0];
+
+	if (tfa98xx->hostless_stream == enable)
+		return 0;
+
+	tfa98xx->hostless_stream = enable;
+	pr_info("%s: hostless_stream = %d\n", __func__, enable);
+
+	if (enable) {
+		if (tfa98xx_profile < 0)
+			tfa98xx_profile = 0;
+
+		tfa98xx_set_stream_state(((tfa98xx->pstream | tfa98xx->hostless_stream) & BIT_PSTREAM)
+			| ((tfa98xx->cstream << 1) & BIT_CSTREAM)
+			| ((tfa98xx->samstream << 2) & BIT_SAMSTREAM));
+
+		if (tfa98xx->handle == 0) {
+			pr_info("%s: start tfa amp (hostless)\n", __func__);
+			if (tfa98xx->dsp_init != TFA98XX_DSP_INIT_PENDING)
+				queue_delayed_work(tfa98xx->tfa98xx_wq,
+					&tfa98xx->init_work, 0);
+		}
+	} else {
+		tfa98xx_set_stream_state(((tfa98xx->pstream | tfa98xx->hostless_stream) & BIT_PSTREAM)
+			| ((tfa98xx->cstream << 1) & BIT_CSTREAM)
+			| ((tfa98xx->samstream << 2) & BIT_SAMSTREAM));
+
+		if (tfa98xx->pstream == 0 && tfa98xx->samstream == 0) {
+			pr_info("%s: stop tfa amp (hostless)\n", __func__);
+			_tfa98xx_stop(tfa98xx);
+		}
+	}
+
+	return 1;
 }
 
 static int tfa98xx_get_stop_ctl(struct snd_kcontrol *kcontrol,
@@ -2398,6 +2449,8 @@ static int tfa98xx_create_controls(struct tfa98xx *tfa98xx)
 	if (tfa98xx->flags & TFA98XX_FLAG_SAAM_AVAILABLE)
 		nr_controls += 1; /* SaaM */
 
+	nr_controls += 1; /* Hostless Enable */
+
 	/* allocate the tfa98xx_controls base on the nr of profiles */
 	nprof = tfa_cont_max_profile(tfa98xx->handle);
 
@@ -2541,6 +2594,19 @@ static int tfa98xx_create_controls(struct tfa98xx *tfa98xx)
 		/* save number of profiles */
 		mix_index++;
 	}
+
+	/* Create a mixer item for hostless playback stream enable */
+	name = devm_kzalloc(tfa98xx->codec->dev, MAX_CONTROL_NAME, GFP_KERNEL);
+	if (!name)
+		return -ENOMEM;
+
+	scnprintf(name, MAX_CONTROL_NAME, "%s Hostless Enable", tfa98xx->fw.name);
+	tfa98xx_controls[mix_index].name = name;
+	tfa98xx_controls[mix_index].iface = SNDRV_CTL_ELEM_IFACE_MIXER;
+	tfa98xx_controls[mix_index].info = snd_soc_info_bool_ext;
+	tfa98xx_controls[mix_index].get = tfa98xx_get_hostless_ctl;
+	tfa98xx_controls[mix_index].put = tfa98xx_set_hostless_ctl;
+	mix_index++;
 
 	return snd_soc_add_codec_controls(tfa98xx->codec,
 		tfa98xx_controls, mix_index);
@@ -3315,7 +3381,7 @@ static void tfa98xx_monitor(struct work_struct *work)
 		val = snd_soc_read(tfa98xx->codec, TFA98XX_STATUS_FLAGS0);
 		pr_debug("STATUS_FLAG0: 0x%04x\n", val);
 
-		if (tfa98xx->pstream != 0) {
+		if (tfa98xx->pstream != 0 || tfa98xx->hostless_stream != 0) {
 			if (!(TFA98XX_STATUS_FLAGS0_SWS & val))
 				pr_err("ERROR: SWS\n");
 
@@ -3866,19 +3932,20 @@ static int _tfa98xx_mute(struct tfa98xx *tfa98xx, int mute, int stream)
 		else if (stream == SNDRV_PCM_STREAM_CAPTURE)
 			tfa98xx->ignored_cstream = 0;
 #endif
-		pr_info("mute:%d [pstream %d, cstream %d, samstream %d]\n",
+		pr_info("mute:%d [pstream %d, cstream %d, samstream %d, hostless %d]\n",
 			mute,
-			tfa98xx->pstream, tfa98xx->cstream, tfa98xx->samstream);
-		tfa98xx_set_stream_state((tfa98xx->pstream & BIT_PSTREAM)
+			tfa98xx->pstream, tfa98xx->cstream, tfa98xx->samstream, tfa98xx->hostless_stream);
+		tfa98xx_set_stream_state(((tfa98xx->pstream | tfa98xx->hostless_stream) & BIT_PSTREAM)
 			|((tfa98xx->cstream<<1) & BIT_CSTREAM)
 			|((tfa98xx->samstream<<2) & BIT_SAMSTREAM));
 
 #if defined(TFA_EXCEPTION_AT_TRANSITION)
 		tfa_exception = TFA98XX_NO_EXCEPTION;
 #endif
-		// wait until both p/cstream (either) and samstream are off
+		// wait until both p/cstream (either) and samstream are off, and hostless is off
 		if (!(tfa98xx->pstream == 0 || tfa98xx->cstream == 0)
-			|| (tfa98xx->samstream != 0)) {
+			|| (tfa98xx->samstream != 0)
+			|| (tfa98xx->hostless_stream != 0)) {
 			pr_info("mute is suspended until both playback and saam streams are off\n");
 			return 0;
 		}
@@ -3916,13 +3983,13 @@ static int _tfa98xx_mute(struct tfa98xx *tfa98xx, int mute, int stream)
 			tfa98xx->pstream = 1;
 		else if (stream == SNDRV_PCM_STREAM_CAPTURE)
 			tfa98xx->cstream = 1;
-		pr_info("mute:%d [pstream %d, cstream %d, samstream %d]\n", mute,
-			tfa98xx->pstream, tfa98xx->cstream, tfa98xx->samstream);
-		tfa98xx_set_stream_state((tfa98xx->pstream & BIT_PSTREAM)
+		pr_info("mute:%d [pstream %d, cstream %d, samstream %d, hostless %d]\n", mute,
+			tfa98xx->pstream, tfa98xx->cstream, tfa98xx->samstream, tfa98xx->hostless_stream);
+		tfa98xx_set_stream_state(((tfa98xx->pstream | tfa98xx->hostless_stream) & BIT_PSTREAM)
 			|((tfa98xx->cstream<<1) & BIT_CSTREAM)|((tfa98xx->samstream<<2) & BIT_SAMSTREAM));
 
 		// wait until when DSP is ready for initialization
-		if (tfa98xx->pstream != 0 || tfa98xx->samstream != 0) {
+		if (tfa98xx->pstream != 0 || tfa98xx->samstream != 0 || tfa98xx->hostless_stream != 0) {
 			pr_debug("unmute is triggered\n");
 		} else {
 			pr_info("unmute is suspended when only cstream is on\n");
