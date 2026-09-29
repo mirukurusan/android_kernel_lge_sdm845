@@ -116,6 +116,7 @@ struct tfa98xx {
 	int pstream;
 	int cstream;
 	int samstream;
+	int hostless_stream;
 #if defined(TFA_EXCEPTION_AT_TRANSITION)
 	// to store skipped streams,
 	// when p/cstream is ignored, overlapped with samstream
