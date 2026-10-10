@@ -1,0 +1,159 @@
+From a90f05fc802edac1deb596c5a70195c1a663fc5c Mon Sep 17 00:00:00 2001
+From: mirukurusan <86687241+mirukurusan@users.noreply.github.com>
+Date: Sat, 10 Oct 2026 10:41:29 +0800
+Subject: [PATCH] kernel: compat: support pre-4.14 kernel_read/kernel_write
+ signatures
+
+KernelSU-Next's raw kernel_read()/kernel_write() call sites assume the
+post-4.14 signatures, but this kernel (4.9.337, LG sdm845) still uses the
+per-positional variants defined in fs/exec.c and fs/splice.c:
+
+  int kernel_read(struct file *, loff_t offset, char *buf, unsigned long)
+  ssize_t kernel_write(struct file *, const char *buf, size_t, loff_t pos)
+
+kernel_write() calls that pass a non-char buffer (u32, struct app_profile)
+fail to compile against the old prototype under
+-Werror,-Wincompatible-pointer-types, and the new-style kernel_read()
+calls compile silently yet pass remapped arguments at the ABI level
+(pointer-as-offset etc.), which makes allowlist load/save, APK signature
+verification and module.rc loading fail at runtime.
+
+Route these call sites through the compat helpers that already implement
+both variants: ksu_kernel_read_compat() and ksu_kernel_write_compat().
+On kernels >= 4.14 the helpers resolve to the plain calls, so behaviour
+there is unchanged.
+---
+ kernel/manager/apk_sign.c         |  5 +++--
+ kernel/manager/throne_tracker.c   |  5 +++--
+ kernel/policy/allowlist.c         | 12 ++++++------
+ kernel/runtime/ksud_integration.c |  2 +-
+ 4 files changed, 13 insertions(+), 11 deletions(-)
+
+diff --git a/kernel/manager/apk_sign.c b/kernel/manager/apk_sign.c
+index 17d69d14..72262894 100644
+--- a/kernel/manager/apk_sign.c
++++ b/kernel/manager/apk_sign.c
+@@ -22,6 +22,7 @@
+ #include "manager/apk_sign.h"
+ #include "uapi/app_profile.h"
+ #include "klog.h" // IWYU pragma: keep
++#include "compat/kernel_compat.h"
+ 
+ struct sdesc {
+ 	struct shash_desc shash;
+@@ -80,7 +81,7 @@ static bool read_exact(struct file *fp, void *buffer, size_t size, loff_t *pos,
+ 	if (*pos < 0 || *pos > end || size > (size_t)(end - *pos))
+ 		return false;
+ 
+-	return kernel_read(fp, buffer, size, pos) == (ssize_t)size;
++	return ksu_kernel_read_compat(fp, buffer, size, pos) == (ssize_t)size;
+ }
+ 
+ static bool read_length_prefixed_end(struct file *fp, loff_t *pos, loff_t container_end, loff_t *value_end)
+@@ -190,7 +191,7 @@ static __always_inline bool check_v2_signature(char *path,
+ 		}
+ 
+ 		pos = file_size - search_size;
+-		kernel_read(fp, eocd_buffer, search_size, &pos);
++		ksu_kernel_read_compat(fp, eocd_buffer, search_size, &pos);
+ 
+ 		if (search_size >= eocd_min_size) {
+ 			long j;
+diff --git a/kernel/manager/throne_tracker.c b/kernel/manager/throne_tracker.c
+index 6cf7d626..09089b7f 100644
+--- a/kernel/manager/throne_tracker.c
++++ b/kernel/manager/throne_tracker.c
+@@ -14,6 +14,7 @@
+ #include "klog.h" // IWYU pragma: keep
+ #include "manager/manager_identity.h"
+ #include "manager/throne_tracker.h"
++#include "compat/kernel_compat.h"
+ 
+ uid_t ksu_manager_appid = KSU_INVALID_APPID;
+ 
+@@ -278,13 +279,13 @@ void track_throne(bool prune_only)
+ 	loff_t line_start = 0;
+ 	char buf[KSU_MAX_PACKAGE_NAME];
+ 	for (;;) {
+-		ssize_t count = kernel_read(fp, &chr, sizeof(chr), &pos);
++		ssize_t count = ksu_kernel_read_compat(fp, &chr, sizeof(chr), &pos);
+ 		if (count != sizeof(chr))
+ 			break;
+ 		if (chr != '\n')
+ 			continue;
+ 
+-		count = kernel_read(fp, buf, sizeof(buf) - 1, &line_start);
++		count = ksu_kernel_read_compat(fp, buf, sizeof(buf) - 1, &line_start);
+ 		if (count <= 0) {
+ 			break;
+ 		}
+diff --git a/kernel/policy/allowlist.c b/kernel/policy/allowlist.c
+index d2bf80a2..00568284 100644
+--- a/kernel/policy/allowlist.c
++++ b/kernel/policy/allowlist.c
+@@ -430,12 +430,12 @@ static void do_persistent_allow_list(struct callback_head *_cb)
+     }
+ 
+ 	// store magic and version
+-	if (kernel_write(fp, &magic, sizeof(magic), &off) != sizeof(magic)) {
++	if (ksu_kernel_write_compat(fp, &magic, sizeof(magic), &off) != sizeof(magic)) {
+ 		pr_err("save_allow_list write magic failed.\n");
+ 		goto close_file;
+ 	}
+ 
+-	if (kernel_write(fp, &version, sizeof(version), &off) != sizeof(version)) {
++	if (ksu_kernel_write_compat(fp, &version, sizeof(version), &off) != sizeof(version)) {
+ 		pr_err("save_allow_list write version failed.\n");
+ 		goto close_file;
+ 	}
+@@ -445,7 +445,7 @@ static void do_persistent_allow_list(struct callback_head *_cb)
+         pr_info("save allow list, name: %s uid :%d, allow: %d\n", p->profile.key, p->profile.curr_uid,
+                 p->profile.allow_su);
+ 
+-        kernel_write(fp, &p->profile, sizeof(p->profile), &off);
++        ksu_kernel_write_compat(fp, &p->profile, sizeof(p->profile), &off);
+     }
+     mutex_unlock(&allowlist_mutex);
+ 
+@@ -532,14 +532,14 @@ void ksu_load_allow_list()
+ 	}
+ 
+ 	// verify magic
+-	if (kernel_read(fp, &magic, sizeof(magic), &off) != sizeof(magic) ||
++	if (ksu_kernel_read_compat(fp, &magic, sizeof(magic), &off) != sizeof(magic) ||
+ 	    magic != FILE_MAGIC) {
+ 		pr_err("allowlist file invalid: %d!\n", magic);
+ 		goto exit;
+ 	}
+ 
+ 	// get file version
+-	if (kernel_read(fp, &version, sizeof(version), &off) != sizeof(version)) {
++	if (ksu_kernel_read_compat(fp, &version, sizeof(version), &off) != sizeof(version)) {
+ 		pr_err("allowlist read version: %d failed\n", version);
+ 		goto exit;
+ 	}
+@@ -557,7 +557,7 @@ void ksu_load_allow_list()
+ 	while (true) {
+ 		struct app_profile profile;
+ 
+-		ret = kernel_read(fp, &profile, app_profile_size, &off);
++		ret = ksu_kernel_read_compat(fp, &profile, app_profile_size, &off);
+ 
+ 		if (ret != app_profile_size) {
+ 			if (ret != 0)
+diff --git a/kernel/runtime/ksud_integration.c b/kernel/runtime/ksud_integration.c
+index 05b6b339..91f3cf12 100644
+--- a/kernel/runtime/ksud_integration.c
++++ b/kernel/runtime/ksud_integration.c
+@@ -134,7 +134,7 @@ static void load_module_rc_once(void)
+ 		goto out_close_file;
+ 	}
+ 
+-	r = kernel_read(f, module_rc_buf, fsize, &pos);
++	r = ksu_kernel_read_compat(f, module_rc_buf, fsize, &pos);
+ 
+ 	if (r <= 0) {
+ 		pr_err("module rc: read failed: %zd\n", r);
+-- 
+2.53.0
+
