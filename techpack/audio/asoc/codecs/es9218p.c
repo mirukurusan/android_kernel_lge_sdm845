@@ -535,8 +535,11 @@ int g_ess_rev = ESS_B;
 
 #define ES9218_RATES (SNDRV_PCM_RATE_8000 | SNDRV_PCM_RATE_11025 |  \
         SNDRV_PCM_RATE_16000 | SNDRV_PCM_RATE_22050 |   \
-        SNDRV_PCM_RATE_32000 | SNDRV_PCM_RATE_48000 |   \
-        SNDRV_PCM_RATE_96000 | SNDRV_PCM_RATE_192000 | SNDRV_PCM_RATE_176400 | SNDRV_PCM_RATE_384000 ) //|SNDRV_PCM_RATE_352800  TODO for dop128
+        SNDRV_PCM_RATE_32000 | SNDRV_PCM_RATE_44100 |   \
+        SNDRV_PCM_RATE_48000 | SNDRV_PCM_RATE_88200 |   \
+        SNDRV_PCM_RATE_96000 | SNDRV_PCM_RATE_176400 |  \
+        SNDRV_PCM_RATE_192000 | SNDRV_PCM_RATE_352800 | \
+        SNDRV_PCM_RATE_384000)
 
 #define ES9218_FORMATS (SNDRV_PCM_FMTBIT_S16_LE | SNDRV_PCM_FMTBIT_S16_BE | \
         SNDRV_PCM_FMTBIT_S20_3LE | SNDRV_PCM_FMTBIT_S20_3BE | \
@@ -1742,7 +1745,7 @@ static int es9218_sabre_cfg_custom_filter(struct sabre_custom_filter *sabre_filt
     reg &= ~0xE0;
 
     if (g_sabre_cf_num > 3) {
-        if(es9218_rate == 384000)
+        if (es9218_rate == 384000 || es9218_rate == 352800)
            rc = es9218_write_reg(g_es9218_priv->i2c_client, ES9218P_REG_44, 0x01);
         else
            rc = es9218_write_reg(g_es9218_priv->i2c_client, ES9218P_REG_44, 0x00);
@@ -2807,6 +2810,7 @@ static int es9218p_set_sample_rate(unsigned int bit_width, unsigned int sample_r
 			es9218_sabre_cfg_custom_filter(&es9218_sabre_custom_ft[g_sabre_cf_num]);
 		}
 		switch (sample_rate) {
+			case 352800:
 			case 384000:
 				reg = es9218_read_reg(g_es9218_priv->i2c_client, ES9218P_REG_07);
 				if(g_sabre_cf_num == 8 || g_sabre_cf_num == 9){
