@@ -80,7 +80,7 @@ static int  es9218p_lpb2standby(void);
 static int es9218p_set_volume_rate(unsigned int sample_rate, unsigned int ess_mode);
 static int es9218p_set_bit_width(unsigned int bit_width, unsigned int ess_mode);
 static void es9218p_initialize_registers(unsigned int ess_mode);
-static int es9218_sabre_cfg_custom_filter(struct sabre_custom_filter *sabre_filter);
+static int es9218_sabre_cfg_custom_filter(int filter_num);
 
 #ifdef CONFIG_SND_SOC_LGE_ESS_DIGITAL_FILTER
 static int get_fade_count_define(void);
@@ -1567,7 +1567,7 @@ static ssize_t set_forced_ess_filter(struct device *dev,
         return count;
     }
 
-    es9218_sabre_cfg_custom_filter(&es9218_sabre_custom_ft[g_sabre_cf_num]);
+    es9218_sabre_cfg_custom_filter(g_sabre_cf_num);
 
     es9218_master_trim(g_es9218_priv->i2c_client, g_volume);
 
@@ -1708,7 +1708,7 @@ static ssize_t set_forced_ess_custom_filter(struct device *dev,
 		pr_info("%s() : state = %s, custom filter data stored for next power-up\n",
 		        __func__, power_state[es9218_power_state]);
 	} else {
-		es9218_sabre_cfg_custom_filter(&es9218_sabre_custom_ft[g_sabre_cf_num]);
+		es9218_sabre_cfg_custom_filter(g_sabre_cf_num);
 	}
 
 	/* We already used up the received data, so free all previously allocated space. */
@@ -1791,23 +1791,29 @@ static const struct attribute_group es9218_attr_group = {
 /*
  *  Program stage1 and stage2 filter coefficients
  */
-static int es9218_sabre_cfg_custom_filter(struct sabre_custom_filter *sabre_filter)
+static int es9218_sabre_cfg_custom_filter(int filter_num)
 {
+    struct sabre_custom_filter *sabre_filter;
     int rc, i, *coeff;
     int count_stage1;
     u8  rv, reg;
 
+    if (filter_num < 0 || filter_num > 11) {
+        pr_err("%s(): Invalid filter_num = %d\n", __func__, filter_num);
+        return -EINVAL;
+    }
+
     reg = es9218_read_reg(g_es9218_priv->i2c_client, ES9218P_REG_07);
-    pr_info("%s(): g_sabre_cf_num = %d, ES9218P_REG_07:%x \n", __func__, g_sabre_cf_num, reg);
+    pr_info("%s(): filter_num = %d, ES9218P_REG_07:%x \n", __func__, filter_num, reg);
     reg &= ~0xE0;
 
-    if (g_sabre_cf_num > 3) {
+    if (filter_num > 3) {
         if (es9218_rate == 384000 || es9218_rate == 352800)
            rc = es9218_write_reg(g_es9218_priv->i2c_client, ES9218P_REG_44, 0x01);
         else
            rc = es9218_write_reg(g_es9218_priv->i2c_client, ES9218P_REG_44, 0x00);
 
-        switch (g_sabre_cf_num) {
+        switch (filter_num) {
             case 4:
             // 3b000: linear phase fast roll-off filter
                 rv = reg|0x00;
@@ -1849,11 +1855,13 @@ static int es9218_sabre_cfg_custom_filter(struct sabre_custom_filter *sabre_filt
                 rc = es9218_write_reg(g_es9218_priv->i2c_client, ES9218P_REG_07, rv);
                 break;
             default:
-                pr_info("%s(): default = %d \n", __func__, g_sabre_cf_num);
+                pr_info("%s(): default = %d \n", __func__, filter_num);
                 break;
         }
         return rc;
     }
+
+    sabre_filter = &es9218_sabre_custom_ft[filter_num];
     count_stage1 = sizeof(sabre_filter->stage1_coeff)/sizeof(sabre_filter->stage1_coeff[0]);
 
     pr_info("%s: count_stage1 : %d",__func__,count_stage1);
@@ -2627,7 +2635,7 @@ static int es9218p_sabre_bypass2hifi(void)
     }
 #endif
     es9218_set_thd(g_es9218_priv->i2c_client, g_headset_type);
-    es9218_sabre_cfg_custom_filter(&es9218_sabre_custom_ft[g_sabre_cf_num]);
+    es9218_sabre_cfg_custom_filter(g_sabre_cf_num);
     es9218_write_reg(g_es9218_priv->i2c_client, ES9218P_REG_15, g_left_volume);     // set left channel digital volume level
     es9218_write_reg(g_es9218_priv->i2c_client, ES9218P_REG_16, g_right_volume);    // set right channel digital volume level
 
@@ -2862,7 +2870,7 @@ static int es9218p_set_sample_rate(unsigned int bit_width, unsigned int sample_r
 		reg = es9218_read_reg(g_es9218_priv->i2c_client, ES9218P_REG_07);
 		if( (g_sabre_cf_num == 4  || g_sabre_cf_num == 5) && (reg & 0x80 )){
 			pr_info("%s set custom filter when g_sabre_cf_num is %d\n", __func__, g_sabre_cf_num);
-			es9218_sabre_cfg_custom_filter(&es9218_sabre_custom_ft[g_sabre_cf_num]);
+			es9218_sabre_cfg_custom_filter(g_sabre_cf_num);
 		}
 		switch (sample_rate) {
 			case 352800:
@@ -2887,7 +2895,7 @@ static int es9218p_set_sample_rate(unsigned int bit_width, unsigned int sample_r
 				break;
 		}
 	}
-    es9218_sabre_cfg_custom_filter(&es9218_sabre_custom_ft[g_sabre_cf_num]);
+    es9218_sabre_cfg_custom_filter(g_sabre_cf_num);
 	return ret;
 }
 
@@ -3554,7 +3562,7 @@ static int es9218_filter_enum_put(struct snd_kcontrol *kcontrol,
     reg = reg|0x01;
     es9218_write_reg(g_es9218_priv->i2c_client, ES9218P_REG_07, reg);
     mdelay(2);
-    es9218_sabre_cfg_custom_filter(&es9218_sabre_custom_ft[g_sabre_cf_num]);
+    es9218_sabre_cfg_custom_filter(g_sabre_cf_num);
     reg = es9218_read_reg(g_es9218_priv->i2c_client, ES9218P_REG_07);
     reg &= ~0x01;
     es9218_write_reg(g_es9218_priv->i2c_client, ES9218P_REG_07, reg);
