@@ -1838,15 +1838,13 @@ static int es9218_sabre_cfg_custom_filter(struct sabre_custom_filter *sabre_filt
                 rc = es9218_write_reg(g_es9218_priv->i2c_client, ES9218P_REG_07, rv);
                 break;
             case 8:
-            /* 3b100: apodizing fast roll-off filter type 1 (default)
-               change into Minimum Phase Fast roll-off for response of sample rate except mqa*/
-                rv = reg|0x40;
+            // 3b100: apodizing fast roll-off filter type 1 (default)
+                rv = reg|0x80;
                 rc = es9218_write_reg(g_es9218_priv->i2c_client, ES9218P_REG_07, rv);
                 break;
             case 9:
-            /* 3b101: apodizing fast roll-off filter type 2
-               change into Minimum Phase Fast roll-off for response of sample rate */
-                rv = reg|0x40;
+            // 3b101: apodizing fast roll-off filter type 2
+                rv = reg|0xA0;
                 rc = es9218_write_reg(g_es9218_priv->i2c_client, ES9218P_REG_07, rv);
                 break;
             case 10:
@@ -2879,12 +2877,7 @@ static int es9218p_set_sample_rate(unsigned int bit_width, unsigned int sample_r
 			case 352800:
 			case 384000:
 				reg = es9218_read_reg(g_es9218_priv->i2c_client, ES9218P_REG_07);
-				if(g_sabre_cf_num == 8 || g_sabre_cf_num == 9){
-					reg &= ~0xE0;
-					reg = reg|0x48;
-				} else {
-					reg = reg|0x8;
-				}
+				reg = reg|0x8;
 				pr_info("%s register_07:%x, sample_rate:%d\n", __func__,reg, sample_rate);
 				ret = es9218_write_reg(g_es9218_priv->i2c_client, ES9218P_REG_07, reg);
 				reg = es9218_read_reg(g_es9218_priv->i2c_client, ES9218P_REG_44);
@@ -2893,12 +2886,7 @@ static int es9218p_set_sample_rate(unsigned int bit_width, unsigned int sample_r
 				break;
 			default :
 				reg = es9218_read_reg(g_es9218_priv->i2c_client, ES9218P_REG_07);
-				if(g_sabre_cf_num == 8 || g_sabre_cf_num == 9){
-					reg &= ~0xE8;
-					reg = reg|0x40;
-				} else {
-					reg &= ~0x8;
-				}
+				reg &= ~0x8;
 				ret = es9218_write_reg(g_es9218_priv->i2c_client, ES9218P_REG_07, reg);
 				pr_info("%s register_07:%x, sample_rate:%d\n", __func__, reg, sample_rate);
 				reg = es9218_read_reg(g_es9218_priv->i2c_client, ES9218P_REG_44);
