@@ -90,10 +90,7 @@ static int get_fade_term_define(void);
 #define VOLUME_UP 1
 #define FADE_INOUT_COUNT 7
 #define FADE_INOUT_TERM 40
-#define SHORT_FILTER 9  // first menu item
 
-#define SHARP_FILTER 4   // second menu item
-#define SLOW_FILTER 5  // third menu item
 static struct workqueue_struct *mute_workqueue;
 struct delayed_work *mute_work;
 static int fade_direction = VOLUME_DOWN;
@@ -1557,13 +1554,7 @@ static ssize_t set_forced_ess_filter(struct device *dev,
 
     g_sabre_cf_num = input_filter;
 
-    // Logic taken from `mute_work_function` above
-    if(g_sabre_cf_num == SHORT_FILTER)
-        g_volume = 0;
-    else if(g_sabre_cf_num == SHARP_FILTER)
-        g_volume = 4;
-    else
-        g_volume = 2;
+    g_volume = 0;
 
     if ( es9218_power_state < ESS_PS_HIFI ) {
         /*
@@ -3330,13 +3321,7 @@ static void mute_work_function(struct work_struct *work)
 			es9218_write_reg(g_es9218_priv->i2c_client, ES9218P_REG_15, g_left_fade_vol);
                         es9218_write_reg(g_es9218_priv->i2c_client, ES9218P_REG_16, g_right_fade_vol);
 		} else {
-//			pr_info("%s(): case 2 called volume g_fade_count %d\n", __func__, g_fade_count);
-			if(g_sabre_cf_num == SHORT_FILTER)
-			    g_volume = 0;
-			else if(g_sabre_cf_num == SHARP_FILTER)
-			    g_volume = 4;
-			else
-			    g_volume = 2;
+			g_volume = 0;
 
                         es9218_master_trim(g_es9218_priv->i2c_client, g_volume);
 			fade_direction = VOLUME_UP;
