@@ -1458,8 +1458,8 @@ static int tcp_v6_rcv(struct sk_buff *skb)
 	hdr = ipv6_hdr(skb);
 
 lookup:
-	sk = __inet6_lookup_skb(&tcp_hashinfo, skb, __tcp_hdrlen(th), sdif,
-				th->source, th->dest, inet6_iif(skb),
+	sk = __inet6_lookup_skb(&tcp_hashinfo, skb, __tcp_hdrlen(th),
+				th->source, th->dest, inet6_iif(skb), sdif,
 				&refcounted);
 	if (!sk)
 		goto no_tcp_socket;
